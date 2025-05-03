@@ -2,7 +2,9 @@
 import argparse
 import os
 from pathlib import Path
+
 from bs4 import BeautifulSoup
+
 
 def extract_text_from_html(html_content):
     """
@@ -65,18 +67,30 @@ def extract_text_from_html(html_content):
 
 def process_directory(input_dir_path):
     """
-    Finds all HTML files in the input directory, converts them to text,
-    and saves them in a 'html2txt' subdirectory.
+    Finds all HTML files recursively in the input directory, converts them to text,
+    and saves them in an 'html2txt' subdirectory, mirroring the original structure.
     """
     input_path = Path(input_dir_path)
     if not input_path.is_dir():
         print(f"Error: Input path '{input_dir_path}' is not a valid directory.")
         return
 
-    print(f"Processing HTML files in: {input_path}")
+    # Define the base output directory inside the input directory
+    output_base_dir = input_path / 'html2txt'
+    print(f"Processing HTML files recursively in: {input_path}")
+    print(f"Output will be saved in: {output_base_dir}")
 
-    for html_file in input_path.glob('*.html'):
-        print(f"  Processing: {html_file.name}")
+    # Use rglob for recursive search
+    for html_file in input_path.rglob('*.html'):
+        # Skip files that might be inside the output directory itself
+        try:
+            if html_file.relative_to(output_base_dir):
+                continue
+        except ValueError:
+            # This means html_file is not inside output_base_dir, which is expected.
+            pass
+
+        print(f"  Processing: {html_file.relative_to(input_path)}")
         try:
             # Read HTML content
             with open(html_file, 'r', encoding='utf-8') as f:
@@ -85,18 +99,17 @@ def process_directory(input_dir_path):
             # Extract text
             extracted_text = extract_text_from_html(html_content)
 
-            # Create output directory
-            output_dir = html_file.parent / 'html2txt'
-            output_dir.mkdir(parents=True, exist_ok=True)
+            # Calculate relative path for mirroring structure
+            relative_path = html_file.relative_to(input_path)
+            output_filepath = output_base_dir / relative_path.with_suffix('.txt')
 
-            # Determine output filename
-            output_filename = html_file.with_suffix('.txt').name
-            output_filepath = output_dir / output_filename
+            # Create necessary parent directories for the output file
+            output_filepath.parent.mkdir(parents=True, exist_ok=True)
 
             # Save extracted text to TXT file
             with open(output_filepath, 'w', encoding='utf-8') as f:
                 f.write(extracted_text)
-            print(f"    Saved to: {output_filepath}")
+            print(f"    Saved to: {output_filepath.relative_to(input_path.parent)}") # Show path relative to input's parent
 
         except Exception as e:
             print(f"    Error processing {html_file.name}: {e}")
