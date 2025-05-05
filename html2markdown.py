@@ -1,124 +1,147 @@
-# Example using Python and BeautifulSoup (requires installation: pip install beautifulsoup4)
 import argparse
+import codecs
 import os
-from pathlib import Path
+import sys
 
-from bs4 import BeautifulSoup
+# Check for html2text dependency at the beginning
+try:
+    import html2text
+except ImportError:
+    print("Error: The 'html2text' library is required. Please install it using 'pip install html2text'", file=sys.stderr)
+    sys.exit(1)
 
+OUTPUT_DIR_NAME = "html2markdown"
 
-def extract_text_from_html(html_content):
+def ensure_dir(directory):
+    """Ensures that the specified directory exists, creating it if necessary."""
+    os.makedirs(directory, exist_ok=True)
+
+def convert_html_to_markdown(input_file_path, output_file_path, converter):
     """
-    Parses HTML content and extracts text from title and specific div.
-    Handles <hr> tags as separators.
+    Reads an HTML file, converts it to Markdown using the provided converter,
+    and saves it to the output path.
     """
-    soup = BeautifulSoup(html_content, 'html.parser')
-    text_parts = []
-
-    # Extract title if present
-    title_tag = soup.find('h1', class_='title')
-    if title_tag:
-        title = title_tag.get_text(strip=True)
-        text_parts.append(title)
-        text_parts.append("\n") # Add space after title
-
-    # Extract main content, handling <hr> as separators
-    content_div = soup.find('div', class_='show-content')
-    if content_div:
-        for element in content_div.children:
-            # Handle NavigableString directly if it's just whitespace or newline
-            if isinstance(element, str) and element.strip() == '':
-                continue
-            # Get text from <p> tags
-            elif element.name == 'p':
-                paragraph_text = element.get_text(strip=True)
-                if paragraph_text: # Avoid adding empty paragraphs
-                    text_parts.append(paragraph_text)
-            # Add separator for <hr> tags
-            elif element.name == 'hr':
-                # Add separator only if the last part wasn't already a separator
-                if text_parts and text_parts[-1] != "\n---\n":
-                    text_parts.append("\n---\n")
-            # Potentially handle other tags or direct text nodes if needed
-            # elif isinstance(element, str) and element.strip():
-            #     text_parts.append(element.strip())
-
-    # Combine parts, adding double newlines between paragraphs/sections
-    # Filter out empty strings that might result from stripping
-    filtered_parts = [part for part in text_parts if part]
-    # Join parts, ensuring proper spacing around separators
-    output_text = ""
-    for i, part in enumerate(filtered_parts):
-        output_text += part
-        # Add double newline after paragraphs, but handle separators correctly
-        if part != "\n---\n" and i < len(filtered_parts) - 1 and filtered_parts[i+1] != "\n---\n":
-             # Add double newline unless the next item is a separator or it's the title line
-             if not (part == title and filtered_parts[i+1] == "\n"): # Avoid extra newline after title if content follows immediately
-                 if filtered_parts[i+1] != "\n": # Check if next item is the newline added after title
-                    output_text += "\n\n"
-        elif part == "\n---\n": # Add newline after separator
-             output_text += "\n"
-        elif part == "\n": # Handle the newline after the title
-             output_text += "\n"
-
-
-    # Remove leading/trailing whitespace and ensure single newline at the end
-    return output_text.strip() + "\n"
-
-
-def process_directory(input_dir_path):
-    """
-    Finds all HTML files recursively in the input directory, converts them to text,
-    and saves them in an 'html2txt' subdirectory, mirroring the original structure.
-    """
-    input_path = Path(input_dir_path)
-    if not input_path.is_dir():
-        print(f"Error: Input path '{input_dir_path}' is not a valid directory.")
-        return
-
-    # Define the base output directory inside the input directory
-    output_base_dir = input_path / 'html2txt'
-    print(f"Processing HTML files recursively in: {input_path}")
-    print(f"Output will be saved in: {output_base_dir}")
-
-    # Use rglob for recursive search
-    for html_file in input_path.rglob('*.html'):
-        # Skip files that might be inside the output directory itself
+    try:
+        # Try reading with UTF-8 first, fallback to default encoding with error handling
         try:
-            if html_file.relative_to(output_base_dir):
-                continue
-        except ValueError:
-            # This means html_file is not inside output_base_dir, which is expected.
-            pass
-
-        print(f"  Processing: {html_file.relative_to(input_path)}")
-        try:
-            # Read HTML content
-            with open(html_file, 'r', encoding='utf-8') as f:
+            with codecs.open(input_file_path, 'r', encoding='utf-8') as f:
+                html_content = f.read()
+        except UnicodeDecodeError:
+            print(f"Warning: UTF-8 decoding failed for {input_file_path}. Trying default encoding.", file=sys.stderr)
+            # Use system's default encoding, ignore errors if it still fails
+            with open(input_file_path, 'r', encoding=sys.getdefaultencoding(), errors='ignore') as f:
                 html_content = f.read()
 
-            # Extract text
-            extracted_text = extract_text_from_html(html_content)
+        markdown_content = converter.handle(html_content)
 
-            # Calculate relative path for mirroring structure
-            relative_path = html_file.relative_to(input_path)
-            output_filepath = output_base_dir / relative_path.with_suffix('.txt')
+        # Ensure the output directory exists before writing
+        ensure_dir(os.path.dirname(output_file_path))
 
-            # Create necessary parent directories for the output file
-            output_filepath.parent.mkdir(parents=True, exist_ok=True)
+        with codecs.open(output_file_path, 'w', encoding='utf-8') as f:
+            f.write(markdown_content)
 
-            # Save extracted text to TXT file
-            with open(output_filepath, 'w', encoding='utf-8') as f:
-                f.write(extracted_text)
-            print(f"    Saved to: {output_filepath.relative_to(input_path.parent)}") # Show path relative to input's parent
+    except FileNotFoundError:
+        print(f"Error: Input file not found during conversion: {input_file_path}", file=sys.stderr)
+    except IOError as e:
+        print(f"Error reading/writing file {input_file_path} or {output_file_path}: {e}", file=sys.stderr)
+    except Exception as e:
+        # Catch potential errors during html2text processing
+        print(f"Error converting file {input_file_path}: {e}", file=sys.stderr)
 
-        except Exception as e:
-            print(f"    Error processing {html_file.name}: {e}")
 
-    print("Processing complete.")
+def process_directory_recursive(input_root_dir, output_root_dir, converter):
+    """
+    Recursively processes a directory, converting all .html and .htm files
+    to Markdown and replicating the directory structure.
+    """
+    print(f"Starting recursive processing of directory: {input_root_dir}")
+    file_count = 0
+    for root, dirs, files in os.walk(input_root_dir, topdown=True):
+        # Calculate the relative path from the input root
+        # This determines the structure within the output directory
+        relative_path = os.path.relpath(root, input_root_dir)
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Convert HTML files in a directory to TXT format.")
-    parser.add_argument("input_dir", help="The directory containing HTML files to convert.")
+        # Determine the corresponding output directory path
+        # If relative_path is '.', it means we are at the root, output path is output_root_dir
+        current_output_dir = os.path.join(output_root_dir, relative_path) if relative_path != '.' else output_root_dir
+
+        # Removed directory creation from here.
+        # ensure_dir will be called by convert_html_to_markdown only if a file needs saving.
+
+        has_html_in_dir = False # Flag to check if any HTML file exists in the current directory
+        for file in files:
+            if file.lower().endswith(('.html', '.htm')):
+                has_html_in_dir = True # Mark that an HTML file was found
+                input_file_path = os.path.join(root, file)
+                base, ext = os.path.splitext(file)
+                output_filename = base + ".md"
+                output_file_path = os.path.join(current_output_dir, output_filename)
+
+                print(f"Converting: {input_file_path} -> {output_file_path}")
+                convert_html_to_markdown(input_file_path, output_file_path, converter)
+                file_count += 1
+
+    print(f"Finished processing directory. Converted {file_count} files.")
+
+
+def main():
+    """Main function to parse arguments and initiate conversion."""
+    parser = argparse.ArgumentParser(
+        description="Convert HTML file(s) to Markdown. Creates an '{}' directory relative to the input path.".format(OUTPUT_DIR_NAME)
+    )
+    parser.add_argument("input_path", help="Path to the input HTML file or directory.")
     args = parser.parse_args()
 
-    process_directory(args.input_dir)
+    # Use absolute path for robustness
+    input_path = os.path.abspath(args.input_path)
+    # Output directory base path will be determined based on input type
+    output_dir_base = None # Initialize output_dir_base
+
+    if not os.path.exists(input_path):
+        print(f"Error: Input path not found: {input_path}", file=sys.stderr)
+        sys.exit(1)
+
+    # Initialize the HTML to Markdown converter
+    h = html2text.HTML2Text()
+    # Set options for the converter if needed
+    h.body_width = 0  # Disable automatic line wrapping for cleaner Markdown
+
+    if os.path.isfile(input_path):
+        if input_path.lower().endswith(('.html', '.htm')):
+            # Handle single file input
+            # Output directory is in the parent directory of the input file
+            input_dir = os.path.dirname(input_path)
+            output_dir_base = os.path.join(input_dir, OUTPUT_DIR_NAME)
+            ensure_dir(output_dir_base) # Create output dir
+            print(f"Output will be saved in: {output_dir_base}")
+
+            base_name = os.path.basename(input_path)
+            name, ext = os.path.splitext(base_name)
+            output_filename = name + ".md"
+            # Place single converted file directly in the output base directory
+            output_file_path = os.path.join(output_dir_base, output_filename)
+
+            print(f"Converting single file: {input_path} -> {output_file_path}")
+            convert_html_to_markdown(input_path, output_file_path, h)
+            print("Conversion complete.")
+        else:
+            print(f"Error: Input file is not an HTML file (.html or .htm): {input_path}", file=sys.stderr)
+            sys.exit(1)
+
+    elif os.path.isdir(input_path):
+        # Handle directory input
+        # Output directory is inside the input directory
+        output_dir_base = os.path.join(input_path, OUTPUT_DIR_NAME)
+        ensure_dir(output_dir_base) # Create output dir
+        print(f"Output will be saved in: {output_dir_base}")
+
+        process_directory_recursive(input_path, output_dir_base, h)
+        # Completion message is printed inside process_directory_recursive
+
+    else:
+        # Handle cases where the path exists but is not a file or directory (e.g., socket, fifo)
+        print(f"Error: Input path is not a valid file or directory: {input_path}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
