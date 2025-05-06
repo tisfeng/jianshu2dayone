@@ -3,6 +3,14 @@ import codecs
 import os
 import sys
 
+# This script converts HTML files to Markdown format using the html2text library.
+# It can process both single HTML files and directories containing HTML files,
+# converting all HTML files within the directory structure to Markdown.
+# The converted Markdown files are saved in a new directory named 'html2markdown'
+# relative to the input path.
+#
+# Usage: python html2markdown.py <path_to_html_file_or_directory>
+
 # Check for html2text dependency at the beginning
 try:
     import html2text
